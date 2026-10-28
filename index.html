@@ -2184,7 +2184,16 @@ function renderDaKhaiBaoThuoc(){
    CĂN CỨ cho từng dòng CLS / thuốc: nguồn, trang, trích dẫn, mức bằng chứng, ảnh chụp (nén)
    Lưu trong dòng khai báo (trường can_cu = chuỗi JSON). Chỉ cảnh báo thiếu, không bắt buộc.
    ============================================================ */
-const EV_MUC = {bo_y_te:'Hướng dẫn / quy định của Bộ Y tế', quoc_te:'Hướng dẫn quốc tế (GOLD, GINA, ESC…)', nghien_cuu:'Nghiên cứu / tài liệu chuyên môn', dong_thuan:'Đồng thuận nội bộ / kinh nghiệm'};
+// Mức bằng chứng — xếp theo thứ tự ưu tiên của tài liệu, màu đậm → nhạt
+const EV_LV = {
+  bo_y_te:   {ten:'Hướng dẫn điều trị Bộ Y tế', ngan:'Bộ Y tế',      bg:'#0F4C47', fg:'#fff'},
+  phac_do_bv:{ten:'Phác đồ điều trị Bệnh viện', ngan:'Phác đồ BV',   bg:'#2E8F85', fg:'#fff'},
+  gl_vn:     {ten:'Guidelines Việt Nam',        ngan:'GL Việt Nam',  bg:'#86C9C1', fg:'#0B3430'},
+  gl_qt:     {ten:'Guidelines Quốc tế',         ngan:'GL Quốc tế',   bg:'#D3EFEB', fg:'#14504C'}
+};
+const EV_MUC = Object.fromEntries(Object.keys(EV_LV).map(k=>[k,EV_LV[k].ten]));
+function evLvKey(v){ return EV_LV[v] ? v : (v==='quoc_te' ? 'gl_qt' : ''); }   // quoc_te: giá trị cũ
+function evBadge(v, full){ const k = evLvKey(v); if(!k) return ''; const L = EV_LV[k]; return `<span class="ev-lv" style="background:${L.bg};color:${L.fg};" title="${esc(L.ten)}">${esc(full?L.ten:L.ngan)}</span>`; }
 const EV_MAX_ANH = 3, EV_MAX_CHARS = 700000;
 let evPending = {cls:null, thuoc:null};
 let evCtx = null;      // {kind, ma, tier, icds:[icdMa], draft, readonly, pending, applyAll}
@@ -2207,18 +2216,19 @@ function evFind(kind, icdMas, ma, tier){ const it = evItems(kind, icdMas, ma, ti
 function evCurIcds(kind){ return (kind==='cls' ? curMapClsIcds : curMapThuocIcds).map(d=>d.ma); }
 function evPendLabel(kind){ return evHas(evPending[kind]) ? '📎 Đã có căn cứ — sửa' : '📎 Căn cứ'; }
 function evBtn(kind, ma, tier){
-  const has = !!evFind(kind, evCurIcds(kind), ma, tier);
-  return `<button class="row-del ev-btn ${has?'has':'miss'}" onclick="evOpen('${kind}','${jsq(ma)}','${tier||''}')" title="${has?'Xem / sửa căn cứ':'Chưa có căn cứ — bấm để thêm'}">${has?'Căn cứ':'+ Căn cứ'}</button>`;
+  const c0 = evFind(kind, evCurIcds(kind), ma, tier), has = !!c0;
+  return `${has?evBadge(c0.muc)+' ':''}<button class="row-del ev-btn ${has?'has':'miss'}" onclick="evOpen('${kind}','${jsq(ma)}','${tier||''}')" title="${has?'Xem / sửa căn cứ':'Chưa có căn cứ — bấm để thêm'}">${has?'Căn cứ':'+ Căn cứ'}</button>`;
 }
 // Liên kết "xem căn cứ" (read-only) cho màn tổng hợp / gợi ý. showMiss: hiện nhãn "chưa có căn cứ" khi thiếu.
 function evMark(kind, ma, tier, icdMas, showMiss){
   const has = !!evFind(kind, icdMas, ma, tier);
   if(!has) return showMiss ? ` <span class="ev-miss">chưa có căn cứ</span>` : '';
-  return ` <a href="#" class="ev-link" onclick="evView('${kind}','${jsq(ma)}','${tier||''}','${icdMas.map(x=>jsq(x)).join(',')}');return false;">📎 căn cứ</a>`;
+  const c = evFind(kind, icdMas, ma, tier);
+  return ` <a href="#" class="ev-link" onclick="evView('${kind}','${jsq(ma)}','${tier||''}','${icdMas.map(x=>jsq(x)).join(',')}');return false;">📎 căn cứ</a>${evBadge(c&&c.muc)?' '+evBadge(c.muc):''}`;
 }
 function evCellHtml(kind, ma, tier, icdMas, c){
   if(!evHas(c)) return '<span class="ev-miss">chưa có</span>';
-  return `<a href="#" class="ev-link" onclick="evView('${kind}','${jsq(ma)}','${tier||''}','${jsq(icdMas.join(','))}');return false;">📎 Xem</a>`;
+  return `<a href="#" class="ev-link" onclick="evView('${kind}','${jsq(ma)}','${tier||''}','${jsq(icdMas.join(','))}');return false;">📎 Xem</a>${evBadge(c.muc)?'<div style="margin-top:3px;">'+evBadge(c.muc)+'</div>':''}`;
 }
 function evView(kind, ma, tier, icdCsv){
   const icds = icdCsv.split(',').filter(Boolean);
@@ -2263,7 +2273,6 @@ function evClose(){ const m = document.getElementById('evModal'); if(m) m.style.
 function evRender(){
   const c = evCtx, d = c.draft, ro = c.readonly, m = document.getElementById('evModal');
   const srcs = evSources();
-  const mucOpts = '<option value="">— Chọn mức bằng chứng —</option>' + Object.keys(EV_MUC).map(k=>`<option value="${k}"${d.muc===k?' selected':''}>${esc(EV_MUC[k])}</option>`).join('');
   const srcOpts = '<option value="">— Chọn từ nguồn đã khai báo của bệnh —</option>' + srcs.map(s=>`<option value="${esc(s.id||s.ten)}"${(d.nguon_id && d.nguon_id===(s.id||s.ten))?' selected':''}>${esc(s.ten||s.link)}${s.so_qd?' (QĐ '+esc(s.so_qd)+')':''}</option>`).join('');
   const thumbs = (d.anh||[]).map((a,i)=>`<div class="ev-thumb"><img src="${a}" onclick="evZoom(${i})" title="Bấm để phóng to">${ro?'':`<button onclick="evDelImg(${i})" title="Bỏ ảnh">×</button>`}</div>`).join('');
   const roTxt = v => v ? esc(v).replace(/\n/g,'<br>') : '<span style="color:var(--ink-faint);">—</span>';
@@ -2271,7 +2280,7 @@ function evRender(){
   if(ro){
     const nm = (srcs.find(s=>(s.id||s.ten)===d.nguon_id)||{});
     body = `<div class="ev-row"><label>Nguồn / tài liệu</label><div>${roTxt(d.nguon)}${nm.link?` · <a href="${esc(nm.link)}" target="_blank" rel="noopener">mở tài liệu</a>`:''}</div></div>
-      <div class="ev-row"><label>Mức bằng chứng</label><div>${roTxt(EV_MUC[d.muc]||'')}</div></div>
+      <div class="ev-row"><label>Mức bằng chứng</label><div>${evBadge(d.muc,true)||'<span style="color:var(--ink-faint);">—</span>'}</div></div>
       <div class="ev-row"><label>Trang / mục</label><div>${roTxt(d.trang)}</div></div>
       <div class="ev-row"><label>Trích dẫn</label><div class="ev-quote">${roTxt(d.trich)}</div></div>
       <div class="ev-row"><label>Ảnh chụp</label><div class="ev-thumbs">${thumbs||'<span style="color:var(--ink-faint);">Không có ảnh</span>'}</div></div>`;
@@ -2280,8 +2289,9 @@ function evRender(){
         <select onchange="evPickSrc(this.value)">${srcOpts}</select>
         <input id="evNguon" value="${esc(d.nguon)}" placeholder="hoặc tự nhập: vd HD chẩn đoán & điều trị COPD — QĐ 4471/QĐ-BYT" oninput="evCtx.draft.nguon=this.value;evCtx.draft.nguon_id=''" style="margin-top:6px;"></div>
       <div class="ev-grid">
-        <div class="ev-row"><label>Mức bằng chứng</label><select onchange="evCtx.draft.muc=this.value">${mucOpts}</select></div>
-        <div class="ev-row"><label>Trang / mục</label><input value="${esc(d.trang)}" placeholder="vd: tr. 45, mục 3.2" oninput="evCtx.draft.trang=this.value"></div>
+        <div class="ev-row" style="grid-column:1/-1;"><label>Mức bằng chứng <span style="font-weight:400;color:var(--ink-faint);">(đậm → nhạt theo thứ tự ưu tiên của tài liệu)</span></label>
+          <div class="ev-lvs">${Object.keys(EV_LV).map(k=>{ const L=EV_LV[k], on = evLvKey(d.muc)===k; return `<button type="button" class="ev-lvbtn${on?' on':''}" style="background:${L.bg};color:${L.fg};" onclick="evSetLv('${k}')">${on?'✓ ':''}${esc(L.ten)}</button>`; }).join('')}</div></div>
+        <div class="ev-row" style="grid-column:1/-1;"><label>Trang / mục</label><input value="${esc(d.trang)}" placeholder="vd: tr. 45, mục 3.2" oninput="evCtx.draft.trang=this.value"></div>
       </div>
       <div class="ev-row"><label>Trích dẫn nguyên văn (1–2 câu)</label><textarea rows="3" placeholder="Chép đúng câu trong tài liệu làm cơ sở cho chỉ định này" oninput="evCtx.draft.trich=this.value">${esc(d.trich)}</textarea></div>
       <div class="ev-row"><label>Ảnh chụp trang tài liệu <span style="font-weight:400;color:var(--ink-faint);">(tối đa ${EV_MAX_ANH} ảnh, tự nén; có thể dán ảnh Ctrl+V)</span></label>
@@ -2297,6 +2307,7 @@ function evRender(){
     <div class="ev-foot">${ro?'':`${(!c.pending && evHas(d))?'<button class="btn ghost small" style="color:#9A3B2E;margin-right:auto;" onclick="evSave(true)">Xoá căn cứ</button>':''}<button class="btn ghost small" onclick="evClose()">Huỷ</button><button class="btn small" onclick="evSave()">Lưu căn cứ</button>`}${ro?'<button class="btn small" onclick="evClose()">Đóng</button>':''}</div>
     <div id="evLightbox" class="ev-light" style="display:none" onclick="this.style.display='none'"><img></div></div>`;
 }
+function evSetLv(k){ evCtx.draft.muc = (evLvKey(evCtx.draft.muc)===k) ? '' : k; evRenderKeep(); }
 function evPickSrc(id){
   const s = evSources().find(x=>(x.id||x.ten)===id); const d = evCtx.draft;
   if(!s){ d.nguon_id=''; return; }
@@ -2365,6 +2376,8 @@ function evSave(clear){
 (function(){
   const st = document.createElement('style');
   st.textContent = `
+  .ev-lv{display:inline-block;font-size:11px;font-weight:700;border-radius:10px;padding:1px 9px;white-space:nowrap;vertical-align:middle;}
+  .ev-lvs{display:flex;flex-wrap:wrap;gap:8px;} .ev-lvbtn{border:2px solid transparent;border-radius:10px;padding:7px 12px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;opacity:.85;} .ev-lvbtn:hover{opacity:1;} .ev-lvbtn.on{opacity:1;border-color:#0b2a3a;box-shadow:0 0 0 2px #fff inset;}
   .ev-btn{margin-right:5px;} .ev-btn.has{color:#14504C;border-color:#9fd6cd;background:#e4f5f2;} .ev-btn.miss{color:#8a4b00;border-color:#efd99a;background:#fff7e0;}
   .ev-btn::before{display:none !important;}
   .ev-link{font-size:12px;color:#14504C;text-decoration:none;font-weight:600;white-space:nowrap;} .ev-link:hover{text-decoration:underline;}
