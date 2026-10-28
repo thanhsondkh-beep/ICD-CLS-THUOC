@@ -1195,6 +1195,7 @@ function cancelEditRow(cat){ editingRow[cat] = null; refreshAllViews(); }
 /* ============================================================
    RENDER DANH MỤC (bảng)
    ============================================================ */
+function jsq(s){ return esc(String(s===undefined||s===null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")); }   // chuỗi an toàn đặt trong onclick="f('...')"
 function esc(s){ return (s===undefined||s===null?'':s.toString()).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function renderIcdTable(){
@@ -1683,7 +1684,7 @@ function renderMapClsBody(){
     html += `<div class="tier-title">Đã khai báo cho các mã đang chọn (${items.length})</div>`;
     html += items.length ? `<table class="datatable"><tbody>` + items.map(it=>`
       <tr><td class="mono" style="width:110px;">${esc(it.ma)}</td><td>${nameOfCls(it.ma)} <span style="color:var(--ink-faint);font-size:12px;">· ${it.tier==='bat_buoc'?'Bắt buộc':'Điều kiện'}</span>${it.tier==='dieu_kien'&&it.dieu_kien?`<div style="font-size:12px;color:var(--ink-soft);">Gợi ý khi: ${esc(it.dieu_kien)}</div>`:''}${it.min_ngay ? `<div style="font-size:12px;color:var(--ink-soft);">Cách tối thiểu ${it.min_ngay} ngày/lần</div>` : ''}</td>
-      <td style="white-space:nowrap;">${evBtn('cls',it.ma,it.tier)}<button class="row-del" onclick="removeMapClsBulk('${esc(it.ma).replace(/'/g,'&#39;')}','${it.tier}')">Xoá</button></td></tr>`).join('') + `</tbody></table>`
+      <td style="white-space:nowrap;">${evBtn('cls',it.ma,it.tier)}<button class="row-del" onclick="removeMapClsBulk('${jsq(it.ma)}','${it.tier}')">Xoá</button></td></tr>`).join('') + `</tbody></table>`
       : `<div class="empty-hint">Chưa có dịch vụ nào.</div>`;
   }
 
@@ -1906,7 +1907,7 @@ function renderMapThuocBody(){
       </tr></thead><tbody>` + items.map(it=>{ const t = drugOf(it.ma); return `
         <tr><td>${esc(t.hoat_chat||'')}</td><td class="mono" style="font-size:11.5px;">${esc(t.ma_bhyt||'')}</td><td>${esc(t.nhom||'')}</td>
         <td style="font-size:12.5px;">${esc(it.lieu||'')}</td><td>${roleLabel(it.vai_tro)}</td>
-        <td style="white-space:nowrap;">${evBtn('thuoc',it.ma,'')}<button class="row-del" onclick="removeMapThuocBulk('${esc(it.ma).replace(/'/g,'&#39;')}')">Xoá</button></td></tr>`; }).join('') + `</tbody></table></div>`
+        <td style="white-space:nowrap;">${evBtn('thuoc',it.ma,'')}<button class="row-del" onclick="removeMapThuocBulk('${jsq(it.ma)}')">Xoá</button></td></tr>`; }).join('') + `</tbody></table></div>`
       : `<div class="empty-hint">Chưa có thuốc nào được khai báo.</div>`;
   }
 
@@ -2207,17 +2208,17 @@ function evCurIcds(kind){ return (kind==='cls' ? curMapClsIcds : curMapThuocIcds
 function evPendLabel(kind){ return evHas(evPending[kind]) ? '📎 Đã có căn cứ — sửa' : '📎 Căn cứ'; }
 function evBtn(kind, ma, tier){
   const has = !!evFind(kind, evCurIcds(kind), ma, tier);
-  return `<button class="row-del ev-btn ${has?'has':'miss'}" onclick="evOpen('${kind}','${esc(ma).replace(/'/g,'&#39;')}','${tier||''}')" title="${has?'Xem / sửa căn cứ':'Chưa có căn cứ — bấm để thêm'}">${has?'Căn cứ':'+ Căn cứ'}</button>`;
+  return `<button class="row-del ev-btn ${has?'has':'miss'}" onclick="evOpen('${kind}','${jsq(ma)}','${tier||''}')" title="${has?'Xem / sửa căn cứ':'Chưa có căn cứ — bấm để thêm'}">${has?'Căn cứ':'+ Căn cứ'}</button>`;
 }
 // Liên kết "xem căn cứ" (read-only) cho màn tổng hợp / gợi ý. showMiss: hiện nhãn "chưa có căn cứ" khi thiếu.
 function evMark(kind, ma, tier, icdMas, showMiss){
   const has = !!evFind(kind, icdMas, ma, tier);
   if(!has) return showMiss ? ` <span class="ev-miss">chưa có căn cứ</span>` : '';
-  return ` <a href="#" class="ev-link" onclick="evView('${kind}','${esc(ma).replace(/'/g,'&#39;')}','${tier||''}','${icdMas.map(x=>esc(x).replace(/'/g,'&#39;')).join(',')}');return false;">📎 căn cứ</a>`;
+  return ` <a href="#" class="ev-link" onclick="evView('${kind}','${jsq(ma)}','${tier||''}','${icdMas.map(x=>jsq(x)).join(',')}');return false;">📎 căn cứ</a>`;
 }
 function evCellHtml(kind, ma, tier, icdMas, c){
   if(!evHas(c)) return '<span class="ev-miss">chưa có</span>';
-  return `<a href="#" class="ev-link" onclick="evView('${kind}','${esc(ma).replace(/'/g,'&#39;')}','${tier||''}','${icdMas.join(',')}');return false;">📎 Xem</a>`;
+  return `<a href="#" class="ev-link" onclick="evView('${kind}','${jsq(ma)}','${tier||''}','${jsq(icdMas.join(','))}');return false;">📎 Xem</a>`;
 }
 function evView(kind, ma, tier, icdCsv){
   const icds = icdCsv.split(',').filter(Boolean);
@@ -2249,6 +2250,9 @@ function evNameOf(){
   const d = drugCatalog.find(x=>x.ma===c.ma); return d ? (d.hoat_chat||d.ten) : c.ma;
 }
 function evShow(){
+  try{ evShow0(); }catch(err){ alert('Không mở được căn cứ: '+(err&&err.message||err)+'\nHãy tải lại trang bằng Ctrl+F5 rồi thử lại.'); }
+}
+function evShow0(){
   let m = document.getElementById('evModal');
   if(!m){ m = document.createElement('div'); m.id='evModal'; m.className='ev-overlay'; document.body.appendChild(m);
     m.addEventListener('mousedown', e=>{ if(e.target===m) evClose(); });
