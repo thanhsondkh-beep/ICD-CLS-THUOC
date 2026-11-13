@@ -1460,7 +1460,7 @@ function sourceBlockHtml(icds, prefix){
     <div class="field-inline" style="flex:1;min-width:200px;"><label>Tên nguồn</label><input id="${prefix}SrcTen" oninput="srcPendingHint('${prefix}')" placeholder="vd: HD chẩn đoán &amp; điều trị THA - Bộ Y tế"></div>
     <div class="field-inline" style="min-width:140px;"><label>Số QĐ</label><input id="${prefix}SrcSoQd" oninput="srcPendingHint('${prefix}')" placeholder="vd: 5389/QĐ-BYT"></div>
     <div class="field-inline" style="min-width:150px;"><label>Ngày hiệu lực</label><input type="date" id="${prefix}SrcNgayHieuLuc" oninput="srcPendingHint('${prefix}')" onchange="srcPendingHint('${prefix}')"></div>
-    <div class="field-inline" style="flex:1;min-width:220px;"><label>Link tài liệu</label><input id="${prefix}SrcLink" oninput="srcPendingHint('${prefix}')" placeholder="https://..."></div>
+    <div class="field-inline" style="flex:1;min-width:220px;"><label>Link tài liệu</label><input id="${prefix}SrcLink" oninput="srcPendingHint('${prefix}')" placeholder="https://... hoặc tải file lên Drive"><div style="margin-top:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><button type="button" class="btn small ghost" onclick="driveUploadFor('${prefix}')">📤 Tải tài liệu lên Drive</button><a href="#" class="only-admin" style="font-size:12px;" onclick="driveConfigOpen();return false;">⚙ Cấu hình Drive</a><span id="${prefix}SrcUpMsg" style="font-size:12px;"></span></div></div>
     <button class="btn small" onclick="addIcdSource('${prefix}')">+ Thêm nguồn</button>
   </div>
   <div id="${prefix}SrcPending" style="display:none;font-size:12.5px;color:#B26A00;margin-top:6px;">⚠ Nguồn bạn vừa gõ <b>chưa được lưu</b> — bấm <b>+ Thêm nguồn</b> (hoặc bấm nút lưu/thêm bên dưới, app sẽ tự lưu kèm theo).</div>`;
@@ -2401,6 +2401,85 @@ function evSave(clear){
   .ev-light{position:absolute;inset:0;background:rgba(0,0,0,.85);border-radius:14px;align-items:center;justify-content:center;cursor:zoom-out;z-index:2;} .ev-light img{max-width:96%;max-height:96%;border-radius:6px;}`;
   document.head.appendChild(st);
 })();
+
+/* ============================================================
+   TẢI TÀI LIỆU LÊN GOOGLE DRIVE (qua Google Apps Script của quản trị)
+   Cấu hình (url + token) lưu ở icdcls_meta/drive — admin ghi, mọi tài khoản đang hoạt động đọc.
+   ============================================================ */
+let driveCfg = null;
+const DRIVE_MAX_MB = 15;
+async function driveLoadCfg(){
+  try{ await fbEnsureDb(); const s = await fbApi.getDoc(fbApi.doc(fbDb, FB_PREFIX+'meta', 'drive')); driveCfg = s.exists() ? s.data() : null; }
+  catch(e){ driveCfg = null; }
+  return driveCfg;
+}
+function driveMsg(prefix, text, kind){
+  const el = document.getElementById(prefix+'SrcUpMsg'); if(!el) return;
+  el.textContent = text||''; el.style.color = kind==='err' ? '#9A3B2E' : (kind==='ok' ? '#14504C' : 'var(--ink-soft)');
+}
+function driveReadB64(file){
+  return new Promise((res, rej)=>{ const r = new FileReader(); r.onload = ()=>res(String(r.result).split(',')[1]||''); r.onerror = ()=>rej(new Error('Không đọc được file')); r.readAsDataURL(file); });
+}
+async function driveUploadFor(prefix){
+  if(noPermIcds(getCurIcdsByPrefix(prefix)).length){ alert(noPermText(getCurIcdsByPrefix(prefix))); return; }
+  if(!driveCfg) await driveLoadCfg();
+  if(!driveCfg || !driveCfg.url){
+    if(isAdmin()){ alert('Chưa cấu hình Google Drive. Bấm "⚙ Cấu hình Drive" để dán đường dẫn Apps Script (xem file hướng dẫn).'); driveConfigOpen(); }
+    else alert('Chưa cấu hình Google Drive. Nhờ tài khoản quản trị (Khoa Dược) cấu hình trước.');
+    return;
+  }
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg';
+  inp.onchange = async ()=>{
+    const f = inp.files && inp.files[0]; if(!f) return;
+    if(f.size > DRIVE_MAX_MB*1024*1024){ driveMsg(prefix, `File quá lớn (${(f.size/1048576).toFixed(1)} MB) — tối đa ${DRIVE_MAX_MB} MB. Hãy nén PDF hoặc cắt bớt trang.`, 'err'); return; }
+    driveMsg(prefix, `Đang tải "${f.name}" lên Drive...`);
+    try{
+      const data = await driveReadB64(f);
+      const resp = await fetch(driveCfg.url, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+        body: JSON.stringify({action:'upload', token: driveCfg.token||'', name: f.name, mime: f.type||'application/octet-stream', data})});
+      const j = await resp.json();
+      if(!j || j.error || !j.url) throw new Error((j&&j.error)||'Drive không trả về đường dẫn');
+      const L = document.getElementById(prefix+'SrcLink'), T = document.getElementById(prefix+'SrcTen');
+      if(L) L.value = j.url;
+      if(T && !T.value.trim()) T.value = f.name.replace(/\.[^.]+$/,'');
+      srcPendingHint(prefix);
+      driveMsg(prefix, `✓ Đã tải lên Drive: ${j.name||f.name}. Bấm "+ Thêm nguồn" để lưu.`, 'ok');
+    }catch(err){ driveMsg(prefix, '⚠ Tải lên thất bại: '+(err.message||err)+' (kiểm tra cấu hình Drive / mã bảo vệ / kết nối mạng).', 'err'); }
+  };
+  inp.click();
+}
+function driveConfigOpen(){
+  if(!isAdmin()){ alert('Chỉ quản trị mới cấu hình được Google Drive.'); return; }
+  let m = document.getElementById('driveModal');
+  if(!m){ m = document.createElement('div'); m.id = 'driveModal'; m.className = 'ev-overlay'; document.body.appendChild(m); m.addEventListener('mousedown', e=>{ if(e.target===m) m.style.display='none'; }); }
+  const c = driveCfg || {};
+  m.innerHTML = `<div class="ev-box" role="dialog" style="width:min(560px,100%);">
+    <div class="ev-head"><div><div style="font-size:12px;color:var(--ink-soft);">Quản trị</div><b>Cấu hình tải tài liệu lên Google Drive</b></div><button class="ev-x" onclick="document.getElementById('driveModal').style.display='none'">×</button></div>
+    <div class="ev-body">
+      <div class="ev-row"><label>Đường dẫn Web app (Apps Script, kết thúc bằng /exec)</label><input id="driveUrl" value="${esc(c.url||'')}" placeholder="https://script.google.com/macros/s/.../exec"></div>
+      <div class="ev-row"><label>Mã bảo vệ (token) — trùng với hằng số TOKEN trong script</label><input id="driveToken" value="${esc(c.token||'')}" placeholder="vd: haihau-2026-xxxx"></div>
+      <div id="driveCfgMsg" style="font-size:12.5px;color:var(--ink-soft);"></div>
+    </div>
+    <div class="ev-foot"><button class="btn ghost small" style="margin-right:auto;" onclick="driveConfigTest()">Kiểm tra kết nối</button><button class="btn ghost small" onclick="document.getElementById('driveModal').style.display='none'">Đóng</button><button class="btn small" onclick="driveConfigSave()">Lưu cấu hình</button></div></div>`;
+  m.style.display = 'flex';
+}
+async function driveConfigTest(){
+  const url = document.getElementById('driveUrl').value.trim(), msg = document.getElementById('driveCfgMsg');
+  if(!url){ msg.textContent = 'Nhập đường dẫn trước.'; return; }
+  msg.textContent = 'Đang kiểm tra...';
+  try{ const r = await fetch(url); const j = await r.json(); msg.style.color = j && j.ok ? '#14504C' : '#9A3B2E'; msg.textContent = j && j.ok ? '✓ Kết nối được Apps Script.' : '⚠ Phản hồi không đúng: '+JSON.stringify(j).slice(0,120); }
+  catch(e){ msg.style.color = '#9A3B2E'; msg.textContent = '⚠ Không kết nối được: '+(e.message||e)+' — kiểm tra quyền truy cập "Anyone" khi triển khai.'; }
+}
+async function driveConfigSave(){
+  const url = document.getElementById('driveUrl').value.trim(), token = document.getElementById('driveToken').value.trim(), msg = document.getElementById('driveCfgMsg');
+  if(url && !/^https:\/\/script\.google\.com\/.+\/exec$/.test(url)){ msg.style.color='#9A3B2E'; msg.textContent = 'Đường dẫn phải dạng https://script.google.com/macros/s/.../exec'; return; }
+  try{
+    await fbEnsureDb();
+    await fbApi.setDoc(fbApi.doc(fbDb, FB_PREFIX+'meta', 'drive'), {url, token, cap_nhat: new Date().toISOString(), boi: (ME&&ME.ten)||''});
+    driveCfg = {url, token};
+    msg.style.color = '#14504C'; msg.textContent = '✓ Đã lưu cấu hình.';
+  }catch(e){ msg.style.color='#9A3B2E'; msg.textContent = '⚠ Không lưu được: '+(e.message||e)+' (đã dán firestore.rules mới chưa?)'; }
+}
 
 function refreshReviewTables(){
   renderDaKhaiBaoCls();
@@ -3742,6 +3821,7 @@ async function fbInitSync(){
     }
     fbApplyPayload(data);
     fbAutoSyncReady = true;
+    driveLoadCfg();
     fbSetStatus('✓ Đã tự động tải dữ liệu từ Firebase lúc mở trang (' + new Date().toLocaleTimeString('vi-VN') + ').', 'ok');
     if(isAdmin()) await fbAdminMigrate(data);
   }catch(err){
